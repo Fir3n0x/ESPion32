@@ -1,6 +1,7 @@
 package com.example.espion32.ui.screens.wifi
 
 import android.annotation.SuppressLint
+import android.graphics.Paint
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -161,20 +163,6 @@ fun ConnectedScreen(navController: NavController, bleViewModel: BleViewModel, wi
             }
         }
 
-//        Column(
-//            modifier = Modifier
-//                .fillMaxSize()
-//                .background(Color.Black)
-//                .padding(top = 80.dp)
-//                .padding(horizontal = 24.dp)
-//        ) {
-//            Text(
-//                text = "CONNECTED",
-//                color = Color(0xFF00FF00),
-//                fontFamily = FontFamily.Monospace,
-//                fontSize = 20.sp
-//            )
-//        }
 
         Column(
             modifier = Modifier
@@ -320,9 +308,9 @@ fun WifiInfoSection(selected: WifiNetwork?) {
 
     var infoExpanded by remember { mutableStateOf(false) }
 
-    LaunchedEffect(selected) {
-        infoExpanded = selected != null
-    }
+//    LaunchedEffect(selected) {
+//        infoExpanded = selected != null
+//    }
 
     if(selected == null) return
 
@@ -372,7 +360,6 @@ fun AttacksColumn(
     navController: NavController,
     selected: WifiNetwork?
 ) {
-    if (selected == null) return
 
     Column(
         modifier = Modifier
@@ -396,20 +383,52 @@ fun AttacksColumn(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(220.dp) // hauteur visible
+                .height(220.dp) // Visible height
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
 
-            // Boutons dans la zone scrollable
-            ActionButton("Sniffer") { navController.navigate("sniffer") }
-            Spacer(Modifier.height(12.dp))
+            // Buttons in scrollable zone
 
-            ActionButton("Deauth") { navController.navigate("deauth") }
-            Spacer(Modifier.height(12.dp))
+            // Require selectedNetwork on
+            if (selected != null) {
+                // Text
+                Text(
+                    text = "------ Require a network ------",
+                    color = Color.White.copy(alpha = 0.4f),
+                    fontFamily = autowide,
+                    fontSize = 14.sp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .wrapContentWidth(Alignment.CenterHorizontally)
+                )
+
+                ActionButton("Sniffer") { navController.navigate("sniffer") }
+                Spacer(Modifier.height(12.dp))
+
+                ActionButton("Deauth") { navController.navigate("deauth") }
+                Spacer(Modifier.height(12.dp))
+            }
+
+            // Do not require selectedNetwork
+
+            // Text
+            Text(
+                text = "--- Do not require a network ---",
+                color = Color.White.copy(alpha = 0.4f),
+                fontFamily = autowide,
+                fontSize = 14.sp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .wrapContentWidth(Alignment.CenterHorizontally)
+            )
 
             ActionButton("Beacon") { navController.navigate("beacon") }
             Spacer(Modifier.height(12.dp))
+
+            ActionButton("Evil Twin") { navController.navigate("eviltwin") }
+            Spacer(Modifier.height(12.dp))
+
         }
     }
 }

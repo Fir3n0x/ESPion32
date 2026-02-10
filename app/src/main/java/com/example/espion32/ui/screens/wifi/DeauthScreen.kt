@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -56,7 +57,7 @@ fun DeauthScreen(navController: NavController, bleViewModel: BleViewModel, wifiV
     val selectedNetwork by wifiViewModel.selectedNetwork.collectAsState()
 
     // Deauth state
-    var targetMac by remember { mutableStateOf("") }
+    var targetMac by remember { mutableStateOf("FF:FF:FF:FF:FF:FF") }
     val attackLogs by bleViewModel.attackLogsDeauth.collectAsState()
     var isAttackRunning by remember { mutableStateOf(false) }
     var safetyCheckbox by remember { mutableStateOf(false) }
@@ -169,7 +170,7 @@ fun DeauthScreen(navController: NavController, bleViewModel: BleViewModel, wifiV
             }
         }
 
-        // Display targeted network
+        // Main content
         Column(
             modifier = Modifier
                 .fillMaxSize()

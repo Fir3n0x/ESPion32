@@ -27,6 +27,7 @@ import com.example.espion32.ui.screens.ble.DeviceScreen
 import com.example.espion32.ui.screens.LoginScreen
 import com.example.espion32.ui.screens.wifi.BFSScreen
 import com.example.espion32.ui.screens.wifi.DeauthScreen
+import com.example.espion32.ui.screens.wifi.EvilTwinScreen
 import com.example.espion32.ui.screens.wifi.SnifferScreen
 import com.example.espion32.viewmodel.BleViewModel
 import com.example.espion32.viewmodel.WifiViewModel
@@ -167,6 +168,13 @@ fun AppNavigation() {
             }
             composable("beacon") {
                 BFSScreen(
+                    navController = navController,
+                    bleViewModel = bleViewModel,
+                    wifiViewModel = wifiViewModel
+                )
+            }
+            composable("eviltwin") {
+                EvilTwinScreen(
                     navController = navController,
                     bleViewModel = bleViewModel,
                     wifiViewModel = wifiViewModel
