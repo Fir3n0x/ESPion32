@@ -40,13 +40,21 @@ sealed class Command {
         }
     }
 
-    // BEACON
+    // BEACON FRAME SPAM
     data class SendStartBeacon(
-        val ssid: String,
-        val channel: Int
+        val channel: Int,
+        val ssids: List<String>
     ) : Command() {
         override fun toPayload(): String {
-            return "BEACON|START|SSID=$ssid|CHANNEL=$channel"
+            // Serialize SSIDs with a separator that won't appear in SSIDs
+            val ssidString = ssids.joinToString(separator = "~")
+            return "BEACON|START|CHANNEL=$channel|SSIDS=$ssidString"
+        }
+    }
+
+    object SendStopBeacon : Command() {
+        override fun toPayload(): String {
+            return "BEACON|STOP"
         }
     }
 

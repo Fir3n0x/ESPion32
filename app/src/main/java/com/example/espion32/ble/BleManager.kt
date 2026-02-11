@@ -192,7 +192,7 @@ class BleManager(
                     connectionEvents.value = BleConnectionState.Connected
 
                     Log.d("BLE", "[I] Connected, requesting MTU...")
-                    gatt.requestMtu(128)
+                    gatt.requestMtu(384)
                     Log.d("BLE", "[I] Connected, discovering services...")
 
                     isConnected = true

@@ -318,6 +318,7 @@ fun DeauthScreen(navController: NavController, bleViewModel: BleViewModel, wifiV
                                 // STOP ATTACK
                                 bleViewModel.logLocalDeauth("Attack stopped")
                                 stopDeauthAttack(bleViewModel)
+                                safetyCheckbox = false
                             }
                         }
                         .padding(horizontal = 32.dp, vertical = 16.dp)

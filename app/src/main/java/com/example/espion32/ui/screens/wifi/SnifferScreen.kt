@@ -389,6 +389,7 @@ fun SnifferScreen(navController: NavController, bleViewModel: BleViewModel, wifi
                                 // STOP ATTACK
                                 bleViewModel.logLocalSniffer("Attack stopped")
                                 stopSnifferAttack(bleViewModel)
+                                safetyCheckbox = false
                             }
                         }
                         .padding(horizontal = 32.dp, vertical = 16.dp)

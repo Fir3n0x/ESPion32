@@ -138,7 +138,7 @@ fun EvilTwinScreen(navController: NavController, bleViewModel: BleViewModel, wif
 
                             } else {
                                 // STOP ATTACK
-
+                                safetyCheckbox = false
                             }
                         }
                         .padding(horizontal = 32.dp, vertical = 16.dp)

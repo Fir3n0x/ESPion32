@@ -1,6 +1,7 @@
 package com.example.espion32.ui.screens.wifi
 
 import android.annotation.SuppressLint
+import androidx.annotation.RequiresPermission
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -12,15 +13,20 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -31,13 +37,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import com.example.espion32.autowide
+import com.example.espion32.model.Command
 import com.example.espion32.viewmodel.BleViewModel
 import com.example.espion32.viewmodel.WifiViewModel
+import java.util.jar.Manifest
 
 enum class WifiBand(val label: String) {
     BAND_24("2.4 GHz"),
@@ -89,6 +100,11 @@ fun BFSScreen(navController: NavController, bleViewModel: BleViewModel, wifiView
         "Samsung-AP34023"
     )) }
     var logs by remember { mutableStateOf(listOf("Ready")) }
+
+    // Security check
+    var ssidWarning by remember { mutableStateOf(false) } // Number of ssid in list
+    var payloadWarning by remember { mutableStateOf(false) } // Payload size
+
 
     // When page is displayed
     LaunchedEffect(Unit) {
@@ -167,12 +183,14 @@ fun BFSScreen(navController: NavController, bleViewModel: BleViewModel, wifiView
                 ssid = ssidInput,
                 onSsidChange = { ssidInput = it },
                 onAddSsid = {
-                    if (ssidInput.isNotBlank()) {
+                    // Input length must be lower or equal to 20 + filter ~ separator
+                    if (ssidInput.isNotBlank() && ssidInput.length <= 20 && !ssidInput.contains("~")) {
                         ssids = ssids + ssidInput
                         logs = logs + "SSID added: $ssidInput"
                         ssidInput = ""
                     }
-                }
+                },
+                safetyAdd = isAttackRunning
             )
 
             Spacer(Modifier.height(16.dp))
@@ -194,6 +212,16 @@ fun BFSScreen(navController: NavController, bleViewModel: BleViewModel, wifiView
 
             // Attack Logs
 
+            // Warning
+            if (ssidWarning) {
+                Text(
+                    text = "/!\\ Too many SSIDs (max 20 allowed)",
+                    color = Color.Red,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+            }
+
             // Bottom Controls: Launch Button & Safety Checkbox
             Row(
                 modifier = Modifier
@@ -210,13 +238,33 @@ fun BFSScreen(navController: NavController, bleViewModel: BleViewModel, wifiView
                             RoundedCornerShape(8.dp)
                         )
                         .clickable(enabled = safetyCheckbox) {
+                            // Number ssid check
+                            if(ssids.size > 20) {
+                                ssidWarning = true
+                                return@clickable
+                            }
+
+                            // Validate payload size (MTU is typically 384, leave room for headers, ~4 bytes)
+                            val payload = Command.SendStartBeacon(channel, ssids).toPayload()
+                            if(payload.length > 370) {
+                                payloadWarning = true
+                                logs = logs + "Payload too large (${payload.length} bytes)"
+                                return@clickable
+                            }
+
+                            ssidWarning = false
+                            payloadWarning = false
                             isAttackRunning = !isAttackRunning
+
                             if (isAttackRunning) {
                                 // START ATTACK
-
+                                launchBeaconAttack(bleViewModel, channel, ssids)
+                                logs = logs + "Beacon attack started on channel $channel"
                             } else {
                                 // STOP ATTACK
-
+                                stopBeaconAttack(bleViewModel)
+                                logs = logs + "Beacon attack stopped"
+                                safetyCheckbox = false
                             }
                         }
                         .padding(horizontal = 32.dp, vertical = 16.dp)
@@ -276,16 +324,31 @@ fun <T> SimpleDropdown(
     var expanded by remember { mutableStateOf(false) }
 
     Column {
-        Text(label, fontSize = 14.sp)
+        Text(label,
+            color = Color(0xFF363535),
+            fontFamily = autowide,
+            fontSize = 16.sp
+        )
+
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .border(1.dp, Color.DarkGray, RoundedCornerShape(6.dp))
+                .background(Color.White.copy(alpha = 0.4f), RoundedCornerShape(6.dp))
                 .clickable { expanded = true }
                 .padding(12.dp)
         ) {
-            Text(valueLabel(value))
-            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            Text(
+                text = valueLabel(value),
+                color = Color(0xFF363535),
+                fontFamily = autowide,
+                fontSize = 12.sp
+            )
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+                modifier = Modifier.heightIn(max = 250.dp)
+            ) {
                 values.forEach {
                     DropdownMenuItem(
                         text = { Text(valueLabel(it)) },
@@ -308,10 +371,11 @@ fun WifiParameters(
     onChannelChange: (Int) -> Unit,
     ssid: String,
     onSsidChange: (String) -> Unit,
-    onAddSsid: () -> Unit
+    onAddSsid: () -> Unit,
+    safetyAdd: Boolean
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
 
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         SimpleDropdown(
             label = "Frequency",
             value = band,
@@ -327,22 +391,53 @@ fun WifiParameters(
         ) { it.toString() }
 
         Row(verticalAlignment = Alignment.CenterVertically) {
-            androidx.compose.material3.OutlinedTextField(
+            OutlinedTextField(
                 value = ssid,
                 onValueChange = onSsidChange,
-                label = { Text("SSID") },
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+                label = {
+                    Text(
+                        text = "SSID",
+                        color = Color.Gray,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 14.sp
+                    )
+                },
+
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = Color(0xFF1A1A1A),
+                    unfocusedContainerColor = Color(0xFF1A1A1A),
+                    disabledContainerColor = Color(0xFF1A1A1A),
+                    errorContainerColor = Color(0xFF1A1A1A),
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    cursorColor = Color.White,
+                    focusedIndicatorColor = Color.Gray,
+                    unfocusedIndicatorColor = Color.DarkGray
+                ),
+                shape = RoundedCornerShape(6.dp)
             )
 
             Spacer(Modifier.width(8.dp))
 
             Box(
                 modifier = Modifier
-                    .background(Color(0xFF1E2624), RoundedCornerShape(6.dp))
-                    .clickable { onAddSsid() }
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                    .background(Color(0xFF1E2624),
+                        RoundedCornerShape(6.dp))
+                    .clickable (
+                        enabled = !safetyAdd
+                    ) { onAddSsid() }
+                    .padding(
+                        horizontal = 16.dp,
+                        vertical = 12.dp
+                    )
             ) {
-                Text("ADD", color = Color.White)
+                Text(
+                    text = "ADD",
+                    color = if(!safetyAdd) Color.White.copy(alpha = 0.9f) else Color.Gray,
+                    fontFamily = autowide,
+                    fontSize = 16.sp
+                )
             }
         }
     }
@@ -357,54 +452,73 @@ fun SsidList(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(140.dp)
+            .height(220.dp)
             .background(Color(0xFF0F0F0F), RoundedCornerShape(6.dp))
-            .border(
-                width = 2.dp,
-                color = Color(0xFF1E2624),
-                shape = RoundedCornerShape(6.dp)
-            )
+            .border(2.dp, Color(0xFF1E2624), RoundedCornerShape(6.dp))
             .padding(8.dp)
     ) {
-        LazyColumn(
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
+        Column {
+            Text(
+                text = "SSIDs",
+                color = Color.White.copy(alpha = 0.9f),
+                fontFamily = autowide,
+                fontSize = 16.sp
+            )
 
-            // HEADER
-            item {
-                Text("SSIDs", fontSize = 16.sp)
-                Spacer(Modifier.height(8.dp))
-            }
+            Spacer(Modifier.height(8.dp))
 
-            // LIST SSIDs
-            itemsIndexed(ssids) { index, ssid ->
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Color.LightGray, RoundedCornerShape(6.dp))
-                        .padding(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(ssid, modifier = Modifier.weight(1f))
-
-                    Text(
-                        "[+]️",
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                itemsIndexed(ssids) { index, ssid ->
+                    Row(
                         modifier = Modifier
-                            .padding(4.dp)
-                            .clickable { onEdit(index) }
-                    )
+                            .fillMaxWidth()
+                            .background(Color(0xFF1E2624), RoundedCornerShape(6.dp))
+                            .padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(ssid, modifier = Modifier.weight(1f), color = Color.White)
 
-                    Text(
-                        "X️",
-                        modifier = Modifier
-                            .padding(4.dp)
-                            .clickable { onDelete(index) }
-                    )
+                        Text(
+                            "[>]",
+                            modifier = Modifier
+                                .padding(4.dp)
+                                .clickable { onEdit(index) }
+                        )
+
+                        Text(
+                            "X",
+                            modifier = Modifier
+                                .padding(4.dp)
+                                .clickable { onDelete(index) }
+                        )
+                    }
                 }
             }
         }
     }
+}
+
+
+@RequiresPermission(android.Manifest.permission.BLUETOOTH_CONNECT)
+fun launchBeaconAttack(bleViewModel: BleViewModel, channel: Int, ssids: List<String>) {
+    if(ssids.isEmpty()) return
+
+    bleViewModel.bleManager.sendCommand(
+        Command.SendStartBeacon(
+            channel = channel,
+            ssids = ssids
+        )
+    )
+}
+
+@RequiresPermission(android.Manifest.permission.BLUETOOTH_CONNECT)
+fun stopBeaconAttack(bleViewModel: BleViewModel) {
+    bleViewModel.bleManager.sendCommand(
+        Command.SendStopBeacon
+    )
 }
 
 
@@ -431,7 +545,8 @@ fun BFSScreenPreview() {
             onAddSsid = {
                 ssids = ssids + ssid
                 ssid = ""
-            }
+            },
+            safetyAdd = true
         )
 
         Spacer(Modifier.height(16.dp))
