@@ -314,7 +314,7 @@ fun BFSScreen(navController: NavController, bleViewModel: BleViewModel, wifiView
 }
 
 @Composable
-fun <T> SimpleDropdown(
+fun <T> BFSDropdown(
     label: String,
     value: T,
     values: List<T>,
@@ -376,14 +376,14 @@ fun WifiParameters(
 ) {
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        SimpleDropdown(
+        BFSDropdown(
             label = "Frequency",
             value = band,
-            values = WifiBand.values().toList(),
+            values = WifiBand.entries.toList(),
             onValueChange = onBandChange
         ) { it.label }
 
-        SimpleDropdown(
+        BFSDropdown(
             label = "Channel",
             value = channel,
             values = channelsForBand(band),

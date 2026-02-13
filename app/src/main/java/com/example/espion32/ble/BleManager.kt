@@ -56,6 +56,10 @@ class BleManager(
     private val _attackLogsDeauth = MutableStateFlow<List<String>>(emptyList())
     val attackLogsDeauth: StateFlow<List<String>> = _attackLogsDeauth.asStateFlow()
 
+    // Handle attack logs evil twin
+    private val _attackLogsEvilTwin = MutableStateFlow<List<String>>(emptyList())
+    val attackLogsEvilTwin: StateFlow<List<String>> = _attackLogsEvilTwin.asStateFlow()
+
     // Handle status (STARTED, STOPPED, ERROR, etc.)
     private val _statusEvents = MutableStateFlow<String?>(null)
     val statusEvents: StateFlow<String?> = _statusEvents.asStateFlow()
@@ -329,6 +333,7 @@ class BleManager(
                     when (event.subtype) {
                         "SNIFF" -> _attackLogsSniffer.value += event.message
                         "DEAUTH" -> _attackLogsDeauth.value += event.message
+                        "EVILTWIN" -> _attackLogsEvilTwin.value += event.message
 //                        else -> {
 //                            _attackLogsSniffer.value += "[${event.subtype}] ${event.message}"
 //                        }
@@ -357,6 +362,7 @@ class BleManager(
                     when (event.subtype) {
                         "SNIFF" -> _attackLogsSniffer.value += "[ERROR] ${event.message}"
                         "DEAUTH" -> _attackLogsDeauth.value += "[ERROR] ${event.message}"
+                        "EVILTWIN" -> _attackLogsEvilTwin.value += "[ERROR] ${event.message}"
 //                        else -> _attackLogsSniffer.value += "[ERROR:${event.subtype}] ${event.message}"
                     }
                 }
@@ -466,12 +472,20 @@ class BleManager(
         _attackLogsDeauth.value += msg
     }
 
+    fun pushLocalLogEvilTwin(msg: String) {
+        _attackLogsEvilTwin.value += msg
+    }
+
     fun clearSnifferLogs() {
         _attackLogsSniffer.value = emptyList()
     }
 
-    fun clearSnifferDeauth() {
+    fun clearSnifferDeauthLogs() {
         _attackLogsDeauth.value = emptyList()
+    }
+
+    fun clearEvilTwinLogs() {
+        _attackLogsEvilTwin.value = emptyList()
     }
 
     private fun hasPermission(permission: String): Boolean {

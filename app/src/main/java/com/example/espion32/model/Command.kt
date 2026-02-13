@@ -1,5 +1,7 @@
 package com.example.espion32.model
 
+import com.example.espion32.ui.screens.wifi.HarvestMethod
+
 sealed class Command {
 
     abstract fun toPayload(): String
@@ -57,6 +59,28 @@ sealed class Command {
             return "BEACON|STOP"
         }
     }
+
+    // EVIL TWIN
+    data class SendStartEvilTwin(
+        val harvestMethod: HarvestMethod,
+        val nameEvilTwin: String
+    ) : Command() {
+        override fun toPayload(): String {
+            return "EVILTWIN|START|METHOD=${idForHarvestMethod(harvestMethod)}|NAME=$nameEvilTwin"
+        }
+    }
+
+    object SendStopEvilTwin : Command() {
+        override fun toPayload(): String {
+            return "EVILTWIN|STOP"
+        }
+    }
+
+    fun idForHarvestMethod(harvestMethod: HarvestMethod): String =
+        when(harvestMethod) { // Transform HarvestMethod class to id
+            HarvestMethod.LOGIN_KEY -> "1"
+            HarvestMethod.CAPTIVE_PORTAL -> "2"
+        }
 
     // MAC
     object SendClearMac : Command() {

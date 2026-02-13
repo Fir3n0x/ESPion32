@@ -25,6 +25,7 @@ class BleViewModel(application: Application) : AndroidViewModel(application) {
     val macEvents = bleManager.macEvents
     val attackLogsSniffer = bleManager.attackLogsSniffer
     val attackLogsDeauth = bleManager.attackLogsDeauth
+    val attackLogsEvilTwin = bleManager.attackLogsEvilTwin
     val statusEvents = bleManager.statusEvents
 
     // BleConnection State
@@ -110,6 +111,8 @@ class BleViewModel(application: Application) : AndroidViewModel(application) {
                     // Stop ESP32 attacks
                     bleManager.sendCommand(Command.SendSniffStop)
                     bleManager.sendCommand(Command.SendStopDeauth)
+                    bleManager.sendCommand(Command.SendStopBeacon)
+                    bleManager.sendCommand(Command.SendStopEvilTwin)
 
                     delay(300)
 
@@ -124,7 +127,8 @@ class BleViewModel(application: Application) : AndroidViewModel(application) {
             // Always clear local state (even if not connected)
             bleManager.clearMacDisplayed()
             bleManager.clearSnifferLogs()
-            bleManager.clearSnifferDeauth()
+            bleManager.clearSnifferDeauthLogs()
+            bleManager.clearEvilTwinLogs()
 
             _selectedDevice.value = null
             _connectionState.value = BleConnectionState.Idle
@@ -142,6 +146,10 @@ class BleViewModel(application: Application) : AndroidViewModel(application) {
         bleManager.pushLocalLogDeauth(msg)
     }
 
+    fun logLocalEvilTwin(msg: String) {
+        bleManager.pushLocalLogEvilTwin(msg)
+    }
+
     fun clearMacEvents() {
         bleManager.clearMacDisplayed()
     }
@@ -155,7 +163,11 @@ class BleViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun clearDeauthLogs() {
-        bleManager.clearSnifferDeauth()
+        bleManager.clearSnifferDeauthLogs()
+    }
+
+    fun clearEvilTwinLogs() {
+        bleManager.clearEvilTwinLogs()
     }
 
     fun notifyEsp32ClearMacs() {
