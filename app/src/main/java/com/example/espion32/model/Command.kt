@@ -36,6 +36,16 @@ sealed class Command {
         }
     }
 
+    data class SendStartTestDeauth(
+        val targetMac: String,
+        val apMac: String,
+        val channel: Int
+    ) : Command() {
+        override fun toPayload(): String {
+            return "DEAUTH|TEST|TARGET=$targetMac|AP=$apMac|CHANNEL=$channel"
+        }
+    }
+
     object SendStopDeauth : Command() {
         override fun toPayload(): String {
             return "DEAUTH|STOP"

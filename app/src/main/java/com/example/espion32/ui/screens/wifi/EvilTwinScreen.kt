@@ -274,7 +274,7 @@ fun EvilTwinScreen(navController: NavController, bleViewModel: BleViewModel, wif
                             if (isAttackRunning) Color(0xFFCC0000) else Color(0xFF1E2624),
                             RoundedCornerShape(8.dp)
                         )
-                        .clickable(enabled = (safetyCheckbox && !nameEvilTwin.isEmpty())) {
+                        .clickable(enabled = (safetyCheckbox && !nameEvilTwin.isEmpty() && nameEvilTwin.length <= 30)) {
                             isAttackRunning = !isAttackRunning
                             if (isAttackRunning) {
                                 // START ATTACK

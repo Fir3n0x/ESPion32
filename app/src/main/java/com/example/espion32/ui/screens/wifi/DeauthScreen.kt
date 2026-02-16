@@ -61,6 +61,7 @@ fun DeauthScreen(navController: NavController, bleViewModel: BleViewModel, wifiV
     val attackLogs by bleViewModel.attackLogsDeauth.collectAsState()
     var isAttackRunning by remember { mutableStateOf(false) }
     var safetyCheckbox by remember { mutableStateOf(false) }
+    var testAttackCheckbox by remember { mutableStateOf(false) }
 
     // Handle display information
     var lastNetwork by remember { mutableStateOf<WifiNetwork?>(null) }
@@ -77,6 +78,7 @@ fun DeauthScreen(navController: NavController, bleViewModel: BleViewModel, wifiV
     LaunchedEffect(Unit) {
         isAttackRunning = false
         safetyCheckbox = false
+        testAttackCheckbox = false
     }
 
     // Detect when user scrolls
@@ -293,6 +295,46 @@ fun DeauthScreen(navController: NavController, bleViewModel: BleViewModel, wifiV
 
             Spacer(Modifier.height(16.dp))
 
+            // Test button
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, Color(0xFF1E2624), RoundedCornerShape(4.dp))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { testAttackCheckbox = !testAttackCheckbox },
+                    horizontalArrangement = Arrangement.Start,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(24.dp)
+                            .background(
+                                if (testAttackCheckbox) Color(0xFF1A1A1A) else Color(0xFF1A1A1A),
+                                RoundedCornerShape(4.dp)
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (testAttackCheckbox) {
+                            Text("X", color = Color.White.copy(alpha = 0.9f), fontSize = 16.sp)
+                        }
+                    }
+
+                    Spacer(Modifier.width(8.dp))
+
+                    Text(
+                        text = "Test if attack works before",
+                        color = Color.White.copy(alpha = 0.9f),
+                        fontFamily = autowide,
+                        fontSize = 12.sp
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
             // Bottom Controls: Launch Button & Safety Checkbox
             Row(
                 modifier = Modifier
@@ -311,9 +353,17 @@ fun DeauthScreen(navController: NavController, bleViewModel: BleViewModel, wifiV
                         .clickable(enabled = safetyCheckbox) {
                             isAttackRunning = !isAttackRunning
                             if (isAttackRunning) {
-                                // START ATTACK
-                                bleViewModel.logLocalDeauth("Attack started on ${selectedNetwork?.ssid}")
-                                launchDeauthAttack(bleViewModel, selectedNetwork, targetMac)
+                                if(testAttackCheckbox) {
+                                    // TEST ATTACK
+                                    bleViewModel.logLocalDeauth("Test attack started on ${selectedNetwork?.ssid}")
+                                    launchTestDeauthAttack(bleViewModel, selectedNetwork, targetMac)
+                                    safetyCheckbox = false
+                                    testAttackCheckbox = false
+                                } else {
+                                    // START ATTACK
+                                    bleViewModel.logLocalDeauth("Attack started on ${selectedNetwork?.ssid}")
+                                    launchDeauthAttack(bleViewModel, selectedNetwork, targetMac)
+                                }
                             } else {
                                 // STOP ATTACK
                                 bleViewModel.logLocalDeauth("Attack stopped")
@@ -373,6 +423,19 @@ fun launchDeauthAttack(bleViewModel: BleViewModel, selectedNetwork: WifiNetwork?
 
     bleViewModel.bleManager.sendCommand(
         Command.SendStartDeauth(
+            targetMac = targetMac,
+            apMac = selectedNetwork.bssid,
+            channel = selectedNetwork.channel
+        )
+    )
+}
+
+@RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
+fun launchTestDeauthAttack(bleViewModel: BleViewModel, selectedNetwork: WifiNetwork?, targetMac: String) {
+    if(selectedNetwork == null) return
+
+    bleViewModel.bleManager.sendCommand(
+        Command.SendStartTestDeauth(
             targetMac = targetMac,
             apMac = selectedNetwork.bssid,
             channel = selectedNetwork.channel
