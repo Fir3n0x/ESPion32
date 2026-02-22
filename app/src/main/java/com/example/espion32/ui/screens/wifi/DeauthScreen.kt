@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -23,6 +24,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -48,6 +51,10 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+enum class AttackMode(val label: String) {
+    DEAUTH("Deauth Attack"),
+    AUTH_STEALER("Auth Stealer")
+}
 
 @SuppressLint("MissingPermission")
 @Composable
@@ -57,6 +64,7 @@ fun DeauthScreen(navController: NavController, bleViewModel: BleViewModel, wifiV
     val selectedNetwork by wifiViewModel.selectedNetwork.collectAsState()
 
     // Deauth state
+    var attackMode by remember { mutableStateOf(AttackMode.DEAUTH) }
     var targetMac by remember { mutableStateOf("FF:FF:FF:FF:FF:FF") }
     val attackLogs by bleViewModel.attackLogsDeauth.collectAsState()
     var isAttackRunning by remember { mutableStateOf(false) }
@@ -202,6 +210,22 @@ fun DeauthScreen(navController: NavController, bleViewModel: BleViewModel, wifiV
                     .fillMaxWidth()
                     .weight(1f)
             ) {
+                // Attack mode dropdown menu (either only deauth or steal auth packet to break handshake)
+                DeauthDropDown(
+                    label = "Attack Mode",
+                    value = attackMode,
+                    values = AttackMode.entries.toList(),
+                    onValueChange = {
+                        attackMode = it
+
+                        // Reset checkbox test when changing mode
+                        if (it != AttackMode.DEAUTH) {
+                            testAttackCheckbox = false
+                        }
+                    }
+                ) { it.label }
+
+                Spacer(Modifier.height(16.dp))
 
                 // MAC Address Input
                 Text(
@@ -295,41 +319,43 @@ fun DeauthScreen(navController: NavController, bleViewModel: BleViewModel, wifiV
 
             Spacer(Modifier.height(16.dp))
 
-            // Test button
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(1.dp, Color(0xFF1E2624), RoundedCornerShape(4.dp))
-            ) {
-                Row(
+            // Test button - Only displayed in DEAUTH MODE
+            if (attackMode == AttackMode.DEAUTH) {
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { testAttackCheckbox = !testAttackCheckbox },
-                    horizontalArrangement = Arrangement.Start,
-                    verticalAlignment = Alignment.CenterVertically
+                        .border(1.dp, Color(0xFF1E2624), RoundedCornerShape(4.dp))
                 ) {
-                    Box(
+                    Row(
                         modifier = Modifier
-                            .size(24.dp)
-                            .background(
-                                if (testAttackCheckbox) Color(0xFF1A1A1A) else Color(0xFF1A1A1A),
-                                RoundedCornerShape(4.dp)
-                            ),
-                        contentAlignment = Alignment.Center
+                            .fillMaxWidth()
+                            .clickable { testAttackCheckbox = !testAttackCheckbox },
+                        horizontalArrangement = Arrangement.Start,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        if (testAttackCheckbox) {
-                            Text("X", color = Color.White.copy(alpha = 0.9f), fontSize = 16.sp)
+                        Box(
+                            modifier = Modifier
+                                .size(24.dp)
+                                .background(
+                                    if (testAttackCheckbox) Color(0xFF1A1A1A) else Color(0xFF1A1A1A),
+                                    RoundedCornerShape(4.dp)
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (testAttackCheckbox) {
+                                Text("X", color = Color.White.copy(alpha = 0.9f), fontSize = 16.sp)
+                            }
                         }
+
+                        Spacer(Modifier.width(8.dp))
+
+                        Text(
+                            text = "Test if attack works before",
+                            color = Color.White.copy(alpha = 0.9f),
+                            fontFamily = autowide,
+                            fontSize = 12.sp
+                        )
                     }
-
-                    Spacer(Modifier.width(8.dp))
-
-                    Text(
-                        text = "Test if attack works before",
-                        color = Color.White.copy(alpha = 0.9f),
-                        fontFamily = autowide,
-                        fontSize = 12.sp
-                    )
                 }
             }
 
@@ -359,10 +385,11 @@ fun DeauthScreen(navController: NavController, bleViewModel: BleViewModel, wifiV
                                     launchTestDeauthAttack(bleViewModel, selectedNetwork, targetMac)
                                     safetyCheckbox = false
                                     testAttackCheckbox = false
+                                    isAttackRunning = false
                                 } else {
                                     // START ATTACK
                                     bleViewModel.logLocalDeauth("Attack started on ${selectedNetwork?.ssid}")
-                                    launchDeauthAttack(bleViewModel, selectedNetwork, targetMac)
+                                    launchDeauthAttack(bleViewModel, selectedNetwork, targetMac, attackMode)
                                 }
                             } else {
                                 // STOP ATTACK
@@ -417,15 +444,67 @@ fun DeauthScreen(navController: NavController, bleViewModel: BleViewModel, wifiV
     }
 }
 
+@Composable
+fun <T> DeauthDropDown(
+    label: String,
+    value: T,
+    values: List<T>,
+    onValueChange: (T) -> Unit,
+    valueLabel: (T) -> String
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Column {
+        Text(
+            text = label,
+            color = Color(0xFF363535),
+            fontFamily = autowide,
+            fontSize = 16.sp
+        )
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(1.dp, Color.DarkGray, RoundedCornerShape(6.dp))
+                .background(Color.White.copy(alpha = 0.4f), RoundedCornerShape(6.dp))
+                .clickable { expanded = true }
+                .padding(12.dp)
+        ) {
+            Text(
+                text = valueLabel(value),
+                color = Color(0xFF363535),
+                fontFamily = autowide,
+                fontSize = 12.sp
+            )
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+                modifier = Modifier.heightIn(max = 250.dp)
+            ) {
+                values.forEach {
+                    DropdownMenuItem(
+                        text = { Text(valueLabel(it)) },
+                        onClick = {
+                            onValueChange(it)
+                            expanded = false
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
 @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
-fun launchDeauthAttack(bleViewModel: BleViewModel, selectedNetwork: WifiNetwork?, targetMac: String) {
+fun launchDeauthAttack(bleViewModel: BleViewModel, selectedNetwork: WifiNetwork?, targetMac: String, attackMode: AttackMode) {
     if(selectedNetwork == null) return
 
     bleViewModel.bleManager.sendCommand(
         Command.SendStartDeauth(
             targetMac = targetMac,
             apMac = selectedNetwork.bssid,
-            channel = selectedNetwork.channel
+            channel = selectedNetwork.channel,
+            attackMode = attackMode
         )
     )
 }

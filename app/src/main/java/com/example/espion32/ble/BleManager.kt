@@ -8,20 +8,26 @@ import android.bluetooth.le.ScanResult
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import android.util.Base64
 import android.util.Log
 import androidx.annotation.RequiresPermission
 import androidx.core.app.ActivityCompat
 import com.example.espion32.model.BleEvent
 import com.example.espion32.model.Command
 import com.example.espion32.model.MAC
+import com.example.espion32.model.PcapTransferState
+import com.example.espion32.pcap.PcapManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.io.File
 import java.util.UUID
 
 class BleManager(
     private val context: Context
 ) {
+
+    private val pcapManager = PcapManager(context)
 
     private val bluetoothAdapter =
         (context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
@@ -63,6 +69,13 @@ class BleManager(
     // Handle status (STARTED, STOPPED, ERROR, etc.)
     private val _statusEvents = MutableStateFlow<String?>(null)
     val statusEvents: StateFlow<String?> = _statusEvents.asStateFlow()
+
+    // Handle PCAP transfer
+    private val _pcapEvents = MutableStateFlow<PcapTransferState>(PcapTransferState.Idle)
+    val pcapEvents: StateFlow<PcapTransferState> = _pcapEvents.asStateFlow()
+
+    private val _savedCaptures = MutableStateFlow<List<File>>(emptyList())
+    val savedCaptures: StateFlow<List<File>> = _savedCaptures.asStateFlow()
 
     // Handle Discovered BLE devices
     val devices = MutableStateFlow<List<BluetoothDevice>>(emptyList())
@@ -340,6 +353,28 @@ class BleManager(
                     }
                 }
 
+                is BleEvent.PcapStart -> {
+                    pcapManager.onPcapStart(event.totalSize, event.frameCount)
+                    _pcapEvents.value = PcapTransferState.Receiving(0, event.totalSize)
+                }
+
+                is BleEvent.PcapChunk -> {
+                    pcapManager.onPcapChunk(event.index, Base64.encodeToString(event.data, Base64.NO_WRAP))
+                    _pcapEvents.value = PcapTransferState.Receiving(event.index, 0)
+                }
+
+                is BleEvent.PcapEnd -> {
+                    val file = pcapManager.onPcapEnd(event.crc)
+                    if (file != null) {
+                        _pcapEvents.value = PcapTransferState.Done(file.absolutePath)
+                        _savedCaptures.value = pcapManager.listCaptures()
+                        _attackLogsDeauth.value += "[v] PCAP saved: ${file.name}"
+                    } else {
+                        _pcapEvents.value = PcapTransferState.Error("CRC mismatch")
+                        _attackLogsDeauth.value += "❌ PCAP transfer failed (CRC error)"
+                    }
+                }
+
                 is BleEvent.MacFound -> {
                     if (event.subtype == "SNIFF") {
                         val macEvent = MAC(
@@ -539,6 +574,25 @@ class BleManager(
                 subtype = subtype,
                 message = kv["msg"] ?: raw
             )
+
+            "PCAP" -> {
+                return when (subtype) {
+                    "START" -> BleEvent.PcapStart(
+                        totalSize  = kv["size"]?.toIntOrNull() ?: 0,
+                        frameCount = kv["frames"]?.toIntOrNull() ?: 0
+                    )
+                    "CHUNK" -> {
+                        // Format : PCAP|CHUNK|<index>|<base64>
+                        val index = parts.getOrNull(2)?.toIntOrNull() ?: return BleEvent.Unknown(raw)
+                        val b64   = parts.getOrNull(3) ?: return BleEvent.Unknown(raw)
+                        BleEvent.PcapChunk(index = index, data = Base64.decode(b64, Base64.NO_WRAP))
+                    }
+                    "END" -> BleEvent.PcapEnd(
+                        crc = kv["crc"]?.removePrefix("0x")?.toIntOrNull(16) ?: 0
+                    )
+                    else -> BleEvent.Unknown(raw)
+                }
+            }
 
             else -> BleEvent.Unknown(raw)
         }

@@ -26,6 +26,26 @@ sealed class BleEvent {
         val message: String
     ) : BleEvent()
 
+    data class PcapStart(
+        val totalSize: Int,
+        val frameCount: Int
+    ) : BleEvent() {
+        override val subtype: String? = null
+    }
+
+    data class PcapChunk(
+        val index : Int,
+        val data : ByteArray
+    ) : BleEvent() {
+        override val subtype: String? = null
+    }
+
+    data class PcapEnd(
+        val crc : Int
+    ) : BleEvent() {
+        override val subtype: String? = null
+    }
+
     data class Unknown(
         val raw: String
     ) : BleEvent() {

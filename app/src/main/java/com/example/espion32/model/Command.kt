@@ -1,5 +1,6 @@
 package com.example.espion32.model
 
+import com.example.espion32.ui.screens.wifi.AttackMode
 import com.example.espion32.ui.screens.wifi.HarvestMethod
 
 sealed class Command {
@@ -29,10 +30,11 @@ sealed class Command {
     data class SendStartDeauth(
         val targetMac: String,
         val apMac: String,
-        val channel: Int
+        val channel: Int,
+        val attackMode: AttackMode
     ) : Command() {
         override fun toPayload(): String {
-            return "DEAUTH|START|TARGET=$targetMac|AP=$apMac|CHANNEL=$channel"
+            return "DEAUTH|START|TARGET=$targetMac|AP=$apMac|CHANNEL=$channel|ATTACKMODE=${idForAttackMode(attackMode)}"
         }
     }
 
@@ -51,6 +53,12 @@ sealed class Command {
             return "DEAUTH|STOP"
         }
     }
+
+    fun idForAttackMode(attackMode: AttackMode): String =
+        when(attackMode) { // Transform AttackMode class to id
+            AttackMode.DEAUTH -> "1"
+            AttackMode.AUTH_STEALER -> "2"
+        }
 
     // BEACON FRAME SPAM
     data class SendStartBeacon(
