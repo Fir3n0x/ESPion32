@@ -25,6 +25,7 @@ import com.example.espion32.ui.screens.wifi.ConnectedScreen
 import com.example.espion32.ui.screens.ble.ConnectingScreen
 import com.example.espion32.ui.screens.ble.DeviceScreen
 import com.example.espion32.ui.screens.LoginScreen
+import com.example.espion32.ui.screens.pcap.PcapLibraryScreen
 import com.example.espion32.ui.screens.wifi.BFSScreen
 import com.example.espion32.ui.screens.wifi.DeauthScreen
 import com.example.espion32.ui.screens.wifi.EvilTwinScreen
@@ -179,6 +180,9 @@ fun AppNavigation() {
                     bleViewModel = bleViewModel,
                     wifiViewModel = wifiViewModel
                 )
+            }
+            composable("pcap_library") {
+                PcapLibraryScreen(navController = navController)
             }
         }
     }

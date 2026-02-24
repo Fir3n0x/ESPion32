@@ -49,12 +49,11 @@ class PcapManager(private val context: Context) {
         Log.d(TAG, "Chunk $index received (${bytes.size} bytes)")
     }
 
-    fun onPcapEnd(crc: Int): File? {
+    fun onPcapEnd(crc: Int, ssid: String = "unknown"): File? {
         if (!isReceiving) return null
         isReceiving = false
         expectedCrc = crc
 
-        // Rebuild in order
         val sortedChunks = chunks.toSortedMap()
         val totalBytes = sortedChunks.values.sumOf { it.size }
         val buffer = ByteArray(totalBytes)
@@ -64,7 +63,6 @@ class PcapManager(private val context: Context) {
             offset += chunk.size
         }
 
-        // Check CRC
         val crc32 = CRC32()
         crc32.update(buffer)
         val computedCrc = crc32.value.toInt()
@@ -74,15 +72,16 @@ class PcapManager(private val context: Context) {
             return null
         }
 
-        // Save
-        return saveToFile(buffer)
+        return saveToFile(buffer, ssid)
     }
 
-    private fun saveToFile(data: ByteArray): File? {
+    private fun saveToFile(data: ByteArray, ssid: String = "unknown"): File? {
         return try {
             val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault())
                 .format(Date())
-            val file = File(pcapDir, "handshake_$timestamp.pcap")
+            // Clean SSID to avoid invalid character in file
+            val cleanSsid = ssid.replace(Regex("[^a-zA-Z0-9_-]"), "_").take(32)
+            val file = File(pcapDir, "${cleanSsid}_$timestamp.pcap")
 
             FileOutputStream(file).use { it.write(data) }
             Log.d(TAG, "PCAP saved: ${file.absolutePath}")

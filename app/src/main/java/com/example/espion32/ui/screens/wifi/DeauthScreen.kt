@@ -382,14 +382,30 @@ fun DeauthScreen(navController: NavController, bleViewModel: BleViewModel, wifiV
                                 if(testAttackCheckbox) {
                                     // TEST ATTACK
                                     bleViewModel.logLocalDeauth("Test attack started on ${selectedNetwork?.ssid}")
+                                    bleViewModel.bleManager.setCurrentTargetSsid(selectedNetwork?.ssid ?: "unknown")
                                     launchTestDeauthAttack(bleViewModel, selectedNetwork, targetMac)
                                     safetyCheckbox = false
                                     testAttackCheckbox = false
                                     isAttackRunning = false
                                 } else {
-                                    // START ATTACK
-                                    bleViewModel.logLocalDeauth("Attack started on ${selectedNetwork?.ssid}")
-                                    launchDeauthAttack(bleViewModel, selectedNetwork, targetMac, attackMode)
+                                    if(attackMode === AttackMode.DEAUTH) {
+                                        // DEAUTH ATTACK
+                                        bleViewModel.logLocalDeauth("Deauth Attack started on ${selectedNetwork?.ssid}")
+                                        bleViewModel.bleManager.setCurrentTargetSsid(selectedNetwork?.ssid ?: "unknown")
+                                        launchDeauthAttack(bleViewModel, selectedNetwork, targetMac, attackMode)
+                                    }
+                                    else if(attackMode === AttackMode.AUTH_STEALER) {
+                                        // AUTH STEALER ATTACK
+                                        bleViewModel.logLocalDeauth("Auth Stealer Attack started on ${selectedNetwork?.ssid}")
+                                        bleViewModel.bleManager.setCurrentTargetSsid(selectedNetwork?.ssid ?: "unknown")
+                                        launchDeauthAttack(bleViewModel, selectedNetwork, targetMac, attackMode)
+                                        safetyCheckbox = false
+                                        isAttackRunning = false
+                                    } else {
+                                        // ERROR
+                                        bleViewModel.logLocalDeauth("Error attack not found")
+                                    }
+
                                 }
                             } else {
                                 // STOP ATTACK

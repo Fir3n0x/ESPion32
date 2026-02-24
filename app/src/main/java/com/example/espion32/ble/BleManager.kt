@@ -35,6 +35,8 @@ class BleManager(
     private var gatt: BluetoothGatt? = null
     private var isConnected = false
 
+    private var currentTargetSsid: String = "unknown"
+
     private val serviceUUID =
         UUID.fromString("4fafc201-1fb5-459e-8fcc-c5c9c331914b")
 
@@ -82,6 +84,10 @@ class BleManager(
 
     // Handle BLE connection state
     val connectionEvents = MutableStateFlow<BleConnectionState>(BleConnectionState.Idle)
+
+    fun setCurrentTargetSsid(ssid: String) {
+        currentTargetSsid = ssid
+    }
 
     @RequiresPermission(Manifest.permission.BLUETOOTH_SCAN)
     fun startScan() {
@@ -364,11 +370,11 @@ class BleManager(
                 }
 
                 is BleEvent.PcapEnd -> {
-                    val file = pcapManager.onPcapEnd(event.crc)
+                    val file = pcapManager.onPcapEnd(event.crc, currentTargetSsid)
                     if (file != null) {
                         _pcapEvents.value = PcapTransferState.Done(file.absolutePath)
                         _savedCaptures.value = pcapManager.listCaptures()
-                        _attackLogsDeauth.value += "[v] PCAP saved: ${file.name}"
+                        _attackLogsDeauth.value += "[i] PCAP saved: ${file.name}"
                     } else {
                         _pcapEvents.value = PcapTransferState.Error("CRC mismatch")
                         _attackLogsDeauth.value += "❌ PCAP transfer failed (CRC error)"

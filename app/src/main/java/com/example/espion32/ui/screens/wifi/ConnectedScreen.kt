@@ -161,6 +161,23 @@ fun ConnectedScreen(navController: NavController, bleViewModel: BleViewModel, wi
                     fontSize = 24.sp
                 )
             }
+
+            // PCAP library button
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(end = 16.dp)
+                    .background(Color(0xFF1E2624).copy(alpha = 0.8f), RoundedCornerShape(8.dp))
+                    .clickable { navController.navigate("pcap_library") }
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            ) {
+                Text(
+                    text = "PCAP",
+                    color = Color.White.copy(alpha = 0.9f),
+                    fontFamily = autowide,
+                    fontSize = 14.sp
+                )
+            }
         }
 
 
