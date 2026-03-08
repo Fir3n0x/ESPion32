@@ -40,6 +40,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ModifierLocalBeyondBoundsLayout
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -65,6 +66,7 @@ fun LoginScreen(navController: NavController, viewModel: BleViewModel) {
     }
 
     // Animation variable
+    var showPcapLibrary by remember { mutableStateOf(false) }
     var showTitle by remember { mutableStateOf(false) }
     var showSubTitle by remember { mutableStateOf(false) }
     var showSelectDeviceButton by remember { mutableStateOf(false) }
@@ -79,12 +81,15 @@ fun LoginScreen(navController: NavController, viewModel: BleViewModel) {
             delay(400)
             showSelectDeviceButton = true
             delay(400)
+            showPcapLibrary = true
+            delay(400)
             showConnectDeviceButton = true
             delay(700)
             AppState.isFirstLaunch = false
         } else {
             // Next launch, direct display without animation
             showTitle = true
+            showPcapLibrary = true
             showSubTitle = true
             showSelectDeviceButton = true
             showConnectDeviceButton = true
@@ -103,6 +108,31 @@ fun LoginScreen(navController: NavController, viewModel: BleViewModel) {
                 .fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            // Header
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 16.dp)
+            ) {
+                // PCAP Library button
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(end = 16.dp)
+                        .background(Color(0xFF1E2624).copy(alpha = 0.8f), RoundedCornerShape(8.dp))
+                        .clickable { navController.navigate("pcap_library") }
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                ) {
+                    Text(
+                        text = "PCAP",
+                        color = Color.White.copy(alpha = 0.9f),
+                        fontFamily = autowide,
+                        fontSize = 14.sp
+                    )
+                }
+            }
+
+
             Spacer(Modifier.height(150.dp))
 
             // Animation
