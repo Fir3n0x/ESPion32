@@ -8,7 +8,8 @@ import android.bluetooth.le.ScanResult
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
-import android.util.Base64
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import androidx.annotation.RequiresPermission
 import androidx.core.app.ActivityCompat
@@ -23,11 +24,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
 import java.util.UUID
 
+@SuppressLint("MissingPermission")
 class BleManager(
     private val context: Context
 ) {
 
-    private val pcapManager = PcapManager(context)
+    // Un SEUL PcapManager, partagé entre la réception BLE et la librairie UI.
+    val pcapManager = PcapManager(context)
 
     private val bluetoothAdapter =
         (context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
@@ -36,6 +39,13 @@ class BleManager(
     private var isConnected = false
 
     private var currentTargetSsid: String = "unknown"
+
+    // Reconnexion ciblée (status 133)
+    private var lastDevice: BluetoothDevice? = null
+    private var connectRetries = 0
+    private val maxConnectRetries = 3
+
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     private val serviceUUID =
         UUID.fromString("4fafc201-1fb5-459e-8fcc-c5c9c331914b")
@@ -72,6 +82,10 @@ class BleManager(
     private val _statusEvents = MutableStateFlow<String?>(null)
     val statusEvents: StateFlow<String?> = _statusEvents.asStateFlow()
 
+    // État "attaque deauth/capture en cours" piloté par les ACK STATUS de l'ESP32
+    private val _deauthRunning = MutableStateFlow(false)
+    val deauthRunning: StateFlow<Boolean> = _deauthRunning.asStateFlow()
+
     // Handle PCAP transfer
     private val _pcapEvents = MutableStateFlow<PcapTransferState>(PcapTransferState.Idle)
     val pcapEvents: StateFlow<PcapTransferState> = _pcapEvents.asStateFlow()
@@ -87,6 +101,75 @@ class BleManager(
 
     fun setCurrentTargetSsid(ssid: String) {
         currentTargetSsid = ssid
+    }
+
+    // ==========================================================================
+    //  FILE D'ATTENTE GATT (une opération à la fois)
+    // ==========================================================================
+    // Android n'autorise qu'UNE opération GATT en vol. On sérialise write /
+    // writeDescriptor : la suivante n'est lancée qu'au callback de complétion
+    // (ou après timeout de sécurité).
+    private class GattOp(val desc: String, val run: () -> Boolean)
+
+    private val opQueue = ArrayDeque<GattOp>()
+    private var opInProgress = false
+    private val opLock = Any()
+    private var opTimeout: Runnable? = null
+
+    private fun enqueueOp(desc: String, run: () -> Boolean) {
+        synchronized(opLock) {
+            opQueue.addLast(GattOp(desc, run))
+            if (!opInProgress) executeNextLocked()
+        }
+    }
+
+    // Doit être appelé en tenant opLock
+    private fun executeNextLocked() {
+        val op = if (opQueue.isEmpty()) null else opQueue.removeFirst()
+        if (op == null) {
+            opInProgress = false
+            return
+        }
+        opInProgress = true
+
+        val timeout = Runnable {
+            Log.w("BLE", "[W] GATT op timeout: ${op.desc}")
+            onOpComplete()
+        }
+        opTimeout = timeout
+        mainHandler.postDelayed(timeout, 3000)
+
+        val started = try {
+            op.run()
+        } catch (e: Exception) {
+            Log.e("BLE", "[F] GATT op exception (${op.desc}): ${e.message}")
+            false
+        }
+
+        if (!started) {
+            Log.e("BLE", "[F] GATT op failed to start: ${op.desc}")
+            mainHandler.removeCallbacks(timeout)
+            opTimeout = null
+            executeNextLocked() // passe à la suivante
+        }
+    }
+
+    private fun onOpComplete() {
+        synchronized(opLock) {
+            opTimeout?.let { mainHandler.removeCallbacks(it) }
+            opTimeout = null
+            opInProgress = false
+            executeNextLocked()
+        }
+    }
+
+    private fun clearOpQueue() {
+        synchronized(opLock) {
+            opTimeout?.let { mainHandler.removeCallbacks(it) }
+            opTimeout = null
+            opQueue.clear()
+            opInProgress = false
+        }
     }
 
     @RequiresPermission(Manifest.permission.BLUETOOTH_SCAN)
@@ -129,30 +212,9 @@ class BleManager(
 
             Log.d("BLE", "Found device: $deviceName (RSSI: ${result.rssi})")
 
-            if(devices.value.none { it.address == device.address}) {
+            if (devices.value.none { it.address == device.address }) {
                 devices.value += device
             }
-
-//            val bleDevice = BleDevice(
-//                name = device.name ?: "Unknown",
-//                mac = device.address
-//            )
-//
-//            if(devices.value.none { it.mac == bleDevice.mac}) {
-//                devices.value += bleDevice
-//            }
-
-//            if (deviceName == "Minimap32") {
-//                // Only connect if signal is strong enough
-//                if (result.rssi < -90) {
-//                    Log.d("BLE", "[W] Signal too weak (${result.rssi}), waiting...")
-//                    return
-//                }
-//
-//                Log.d("BLE", "[I] ESP32 trouvé")
-//                bluetoothAdapter.bluetoothLeScanner.stopScan(this)
-//                connect(device)
-//            }
         }
 
         override fun onScanFailed(errorCode: Int) {
@@ -169,24 +231,31 @@ class BleManager(
             }
         }
 
-        // Close any existing connection
+        lastDevice = device
+        connectRetries = 0
+        doConnect(device)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun doConnect(device: BluetoothDevice) {
+        // Close any existing connection + reset the op queue
+        clearOpQueue()
         gatt?.close()
         gatt = null
 
         // Small delay to let the BLE stack reset
-        android.os.Handler(android.os.Looper.getMainLooper())
-            .postDelayed({
-                    Log.d("BLE", "[I] Connecting to device...")
+        mainHandler.postDelayed({
+            Log.d("BLE", "[I] Connecting to device... (try ${connectRetries + 1})")
 
-                    // Try connection with autoConnect = true for more stable connection
-                    gatt = device.connectGatt(
-                        context,
-                        true,  // Changed to true for auto-reconnect
-                        gattCallback,
-                        BluetoothDevice.TRANSPORT_LE
-                    )
-                }, 500
-            )  // Delay
+            // autoConnect = false : connexion initiale rapide et déterministe.
+            // La reconnexion est gérée explicitement (voir status 133).
+            gatt = device.connectGatt(
+                context,
+                false,
+                gattCallback,
+                BluetoothDevice.TRANSPORT_LE
+            )
+        }, 500)
     }
 
     private val gattCallback = object : BluetoothGattCallback() {
@@ -203,36 +272,43 @@ class BleManager(
 
             if (status != BluetoothGatt.GATT_SUCCESS) {
                 Log.e("BLE", "[F] Connection failed: status=$status")
-                connectionEvents.value =
-                    BleConnectionState.Error("Connection failed (status=$status)")
+                isConnected = false
+                clearOpQueue()
                 gatt.close()
+                this@BleManager.gatt = null
+
+                // status 133 (GATT_ERROR) : erreur transitoire fréquente -> retry
+                val dev = lastDevice
+                if (status == 133 && dev != null && connectRetries < maxConnectRetries) {
+                    connectRetries++
+                    Log.w("BLE", "[W] status 133 -> retry $connectRetries/$maxConnectRetries")
+                    connectionEvents.value = BleConnectionState.Connecting
+                    mainHandler.postDelayed({ doConnect(dev) }, 600L * connectRetries)
+                } else {
+                    connectionEvents.value =
+                        BleConnectionState.Error("Connection failed (status=$status)")
+                }
                 return
             }
 
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
-                    // Update ble connection state
                     connectionEvents.value = BleConnectionState.Connected
-
                     Log.d("BLE", "[I] Connected, requesting MTU...")
-                    gatt.requestMtu(384)
-                    Log.d("BLE", "[I] Connected, discovering services...")
-
                     isConnected = true
+                    gatt.requestMtu(384)
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
-                    // Update ble connection state
                     connectionEvents.value = BleConnectionState.Disconnected
-
                     Log.d("BLE", "[I] Disconnected")
                     isConnected = false
+                    _deauthRunning.value = false
+                    clearOpQueue()
                     gatt.close()
+                    this@BleManager.gatt = null
                 }
                 else -> {
-                    // Update ble connection state
-                    connectionEvents.value = BleConnectionState.Error("Connection failed")
-
-                    Log.d("BLE", "[F] Connection failed")
+                    Log.d("BLE", "[I] Connection state=$newState")
                 }
             }
         }
@@ -240,19 +316,14 @@ class BleManager(
         @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
         override fun onMtuChanged(gatt: BluetoothGatt, mtu: Int, status: Int) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
-                // Update ble connection state
                 connectionEvents.value = BleConnectionState.MtuRequested
-
                 Log.d("BLE", "[I] MTU negotiated: $mtu")
                 gatt.discoverServices()
             } else {
-                // Update ble connection state
                 connectionEvents.value = BleConnectionState.Error("MTU failed")
-
                 Log.e("BLE", "[F] MTU request failed")
             }
         }
-
 
         @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
@@ -268,9 +339,7 @@ class BleManager(
                     return
                 }
 
-                // Update ble connection state
                 connectionEvents.value = BleConnectionState.ServicesDiscovered
-
                 Log.d("BLE", "[I] Services discovered!")
 
                 val statusChar = service.getCharacteristic(statusUUID)
@@ -280,7 +349,6 @@ class BleManager(
                     return
                 }
 
-                // Enable notifications - USE NEW API
                 gatt.setCharacteristicNotification(statusChar, true)
 
                 val cccd = statusChar.getDescriptor(cccdUUID)
@@ -290,18 +358,19 @@ class BleManager(
                     return
                 }
 
-                // Use Android 13+ API or fallback
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    gatt.writeDescriptor(cccd, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
-                } else {
-                    @Suppress("DEPRECATION")
-                    cccd.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                    @Suppress("DEPRECATION")
-                    gatt.writeDescriptor(cccd)
+                // Écriture du CCCD via la file GATT
+                enqueueOp("enable-notifications") {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        gatt.writeDescriptor(cccd, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE) ==
+                            BluetoothStatusCodes.SUCCESS
+                    } else {
+                        @Suppress("DEPRECATION")
+                        cccd.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                        @Suppress("DEPRECATION")
+                        gatt.writeDescriptor(cccd)
+                    }
                 }
-
-                Log.d("BLE", "[I] Notifications enabled!")
-
+                Log.d("BLE", "[I] Notifications enable queued")
             } else {
                 connectionEvents.value = BleConnectionState.Error("Service discovery failed")
                 Log.e("BLE", "[F] Service discovery failed: $status")
@@ -315,13 +384,13 @@ class BleManager(
         ) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 Log.d("BLE", "[I] Descriptor written successfully")
-
-                // SET READY STATE HERE - after descriptor is confirmed written
                 connectionEvents.value = BleConnectionState.Ready
+                connectRetries = 0
             } else {
                 Log.e("BLE", "[F] Descriptor write failed: $status")
                 connectionEvents.value = BleConnectionState.Error("Descriptor write failed")
             }
+            onOpComplete()
         }
 
         override fun onCharacteristicWrite(
@@ -334,6 +403,7 @@ class BleManager(
             } else {
                 Log.e("BLE", "[F] Characteristic write failed: $status")
             }
+            onOpComplete()
         }
 
         override fun onCharacteristicChanged(
@@ -351,11 +421,8 @@ class BleManager(
                 is BleEvent.Log -> {
                     when (event.subtype) {
                         "SNIFF" -> _attackLogsSniffer.value += event.message
-                        "DEAUTH" -> _attackLogsDeauth.value += event.message
+                        "DEAUTH", "STEAL" -> _attackLogsDeauth.value += event.message
                         "EVILTWIN" -> _attackLogsEvilTwin.value += event.message
-//                        else -> {
-//                            _attackLogsSniffer.value += "[${event.subtype}] ${event.message}"
-//                        }
                     }
                 }
 
@@ -365,19 +432,26 @@ class BleManager(
                 }
 
                 is BleEvent.PcapChunk -> {
-                    pcapManager.onPcapChunk(event.index, Base64.encodeToString(event.data, Base64.NO_WRAP))
+                    // Pas de double base64 : on passe le ByteArray tel quel
+                    pcapManager.onPcapChunk(event.index, event.data)
                     _pcapEvents.value = PcapTransferState.Receiving(event.index, 0)
                 }
 
                 is BleEvent.PcapEnd -> {
-                    val file = pcapManager.onPcapEnd(event.crc, currentTargetSsid)
+                    val result = pcapManager.onPcapEnd(event.crc, currentTargetSsid)
+                    val file = result.file
                     if (file != null) {
                         _pcapEvents.value = PcapTransferState.Done(file.absolutePath)
                         _savedCaptures.value = pcapManager.listCaptures()
-                        _attackLogsDeauth.value += "[i] PCAP saved: ${file.name}"
+                        if (result.missingChunks.isEmpty() && result.crcOk) {
+                            _attackLogsDeauth.value += "[i] PCAP saved: ${file.name}"
+                        } else {
+                            _attackLogsDeauth.value +=
+                                "[!] PCAP PARTIEL saved: ${file.name} (crcOk=${result.crcOk}, manquants=${result.missingChunks.size})"
+                        }
                     } else {
-                        _pcapEvents.value = PcapTransferState.Error("CRC mismatch")
-                        _attackLogsDeauth.value += "❌ PCAP transfer failed (CRC error)"
+                        _pcapEvents.value = PcapTransferState.Error("Transfert échoué")
+                        _attackLogsDeauth.value += "❌ PCAP transfer failed"
                     }
                 }
 
@@ -388,32 +462,34 @@ class BleManager(
                             rssi = event.rssi,
                             channel = event.channel
                         )
-
                         _macEvents.value =
-                            (_macEvents.value + macEvent)
-                                .distinctBy { it.mac }
+                            (_macEvents.value + macEvent).distinctBy { it.mac }
                     }
                 }
 
                 is BleEvent.Status -> {
                     _statusEvents.value = "${event.subtype}:${event.value}"
+                    // Pilote l'état d'attaque à partir des ACK de l'ESP32
+                    if (event.subtype == "DEAUTH") {
+                        when (event.value.uppercase()) {
+                            "STARTED" -> _deauthRunning.value = true
+                            "STOPPED" -> _deauthRunning.value = false
+                        }
+                    }
                 }
 
                 is BleEvent.Error -> {
                     when (event.subtype) {
                         "SNIFF" -> _attackLogsSniffer.value += "[ERROR] ${event.message}"
-                        "DEAUTH" -> _attackLogsDeauth.value += "[ERROR] ${event.message}"
+                        "DEAUTH", "STEAL" -> _attackLogsDeauth.value += "[ERROR] ${event.message}"
                         "EVILTWIN" -> _attackLogsEvilTwin.value += "[ERROR] ${event.message}"
-//                        else -> _attackLogsSniffer.value += "[ERROR:${event.subtype}] ${event.message}"
                     }
                 }
 
                 is BleEvent.Unknown -> {
-//                    _attackLogsSniffer.value += "[RAW] ${event.raw}"
+                    // ignore
                 }
             }
-
-
         }
 
         // Deprecated but still called on older devices
@@ -453,22 +529,25 @@ class BleManager(
             return
         }
 
-        // Use Android 13+ API or fallback
         val data = cmd.toByteArray()
         val writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            gatt?.writeCharacteristic(cmdChar, data, writeType)
-        } else {
-            @Suppress("DEPRECATION")
-            cmdChar.value = data
-            @Suppress("DEPRECATION")
-            cmdChar.writeType = writeType
-            @Suppress("DEPRECATION")
-            gatt?.writeCharacteristic(cmdChar)
+        // Écriture mise en file (une opération GATT à la fois)
+        enqueueOp("cmd:$cmd") {
+            val g = gatt ?: return@enqueueOp false
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                g.writeCharacteristic(cmdChar, data, writeType) == BluetoothStatusCodes.SUCCESS
+            } else {
+                @Suppress("DEPRECATION")
+                cmdChar.value = data
+                @Suppress("DEPRECATION")
+                cmdChar.writeType = writeType
+                @Suppress("DEPRECATION")
+                g.writeCharacteristic(cmdChar)
+            }
         }
 
-        Log.d("BLE", "[I] CMD sent: $cmd")
+        Log.d("BLE", "[I] CMD queued: $cmd")
     }
 
     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
@@ -478,28 +557,37 @@ class BleManager(
 
     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
     fun disconnect() {
-        // Disconnect GATT
-        gatt?.disconnect()
-        gatt?.close()
-        gatt = null
-
-        // Reset internal flags
+        clearOpQueue()
+        // On demande la déconnexion ; le close() sera fait dans le callback
+        // onConnectionStateChange(DISCONNECTED) pour éviter la course qui
+        // masquait ce callback.
+        val g = gatt
+        if (g != null) {
+            g.disconnect()
+            // Filet de sécurité : si aucun callback n'arrive, on ferme.
+            mainHandler.postDelayed({
+                if (!isConnected) {
+                    try { g.close() } catch (_: Exception) {}
+                    if (gatt === g) gatt = null
+                }
+            }, 1500)
+        }
         isConnected = false
+        _deauthRunning.value = false
     }
 
     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
     fun resetSession() {
         Log.d("BLE", "[I] Reset BLE session")
-
-        // disconnect
         disconnect()
-
-        // RESET ALL STATES
         connectionEvents.value = BleConnectionState.Idle
         _macEvents.value = emptyList()
         devices.value = emptyList()
     }
 
+    fun refreshCaptures() {
+        _savedCaptures.value = pcapManager.listCaptures()
+    }
 
     fun clearMacDisplayed() {
         _macEvents.value = emptyList()
@@ -536,72 +624,8 @@ class BleManager(
         ) == PackageManager.PERMISSION_GRANTED
     }
 
-    // Parse received command
-    private fun parseBleMessage(raw: String): BleEvent {
-        val parts = raw.trim().split("|")
-        if (parts.size < 2) return BleEvent.Unknown(raw)
-
-        val type = parts[0]
-        val subtype = parts[1]
-
-        val kv = parts.drop(2)
-            .mapNotNull {
-                val idx = it.indexOf("=")
-                if (idx == -1) null
-                else it.substring(0, idx) to it.substring(idx + 1)
-            }
-            .toMap()
-
-        return when (type) {
-            "LOG" -> BleEvent.Log(
-                subtype = subtype,
-                message = kv["msg"] ?: raw
-            )
-
-            "MAC" -> {
-                val mac = kv["mac"] ?: return BleEvent.Unknown(raw)
-                val rssi = kv["rssi"]?.toIntOrNull() ?: return BleEvent.Unknown(raw)
-                val ch = kv["ch"]?.toIntOrNull() ?: return BleEvent.Unknown(raw)
-
-                BleEvent.MacFound(
-                    subtype = subtype,
-                    mac = mac,
-                    rssi = rssi,
-                    channel = ch
-                )
-            }
-
-            "STATUS" -> BleEvent.Status(
-                subtype = subtype,
-                value = kv["value"] ?: raw
-            )
-
-            "ERROR" -> BleEvent.Error(
-                subtype = subtype,
-                message = kv["msg"] ?: raw
-            )
-
-            "PCAP" -> {
-                return when (subtype) {
-                    "START" -> BleEvent.PcapStart(
-                        totalSize  = kv["size"]?.toIntOrNull() ?: 0,
-                        frameCount = kv["frames"]?.toIntOrNull() ?: 0
-                    )
-                    "CHUNK" -> {
-                        // Format : PCAP|CHUNK|<index>|<base64>
-                        val index = parts.getOrNull(2)?.toIntOrNull() ?: return BleEvent.Unknown(raw)
-                        val b64   = parts.getOrNull(3) ?: return BleEvent.Unknown(raw)
-                        BleEvent.PcapChunk(index = index, data = Base64.decode(b64, Base64.NO_WRAP))
-                    }
-                    "END" -> BleEvent.PcapEnd(
-                        crc = kv["crc"]?.removePrefix("0x")?.toIntOrNull(16) ?: 0
-                    )
-                    else -> BleEvent.Unknown(raw)
-                }
-            }
-
-            else -> BleEvent.Unknown(raw)
-        }
-    }
+    // Parse received notification (délègue à l'objet pur, testable en JVM)
+    private fun parseBleMessage(raw: String): BleEvent =
+        BleMessageParser.parse(raw) { android.util.Base64.decode(it, android.util.Base64.NO_WRAP) }
 
 }

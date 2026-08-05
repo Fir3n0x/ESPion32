@@ -28,6 +28,11 @@ class BleViewModel(application: Application) : AndroidViewModel(application) {
     val attackLogsEvilTwin = bleManager.attackLogsEvilTwin
     val statusEvents = bleManager.statusEvents
 
+    // Transfert PCAP + captures + état d'attaque (piloté par ACK ESP32)
+    val pcapEvents = bleManager.pcapEvents
+    val savedCaptures = bleManager.savedCaptures
+    val deauthRunning = bleManager.deauthRunning
+
     // BleConnection State
     private val _connectionState = MutableStateFlow<BleConnectionState>(BleConnectionState.Idle)
     val connectionState = _connectionState.asStateFlow()
@@ -179,5 +184,19 @@ class BleViewModel(application: Application) : AndroidViewModel(application) {
         // Send message to clear mac esp32 side
         Log.d("BLE", "Sending WIFI CLEAR")
         bleManager.sendCommand(Command.SendClearWifi)
+    }
+
+    fun refreshCaptures() {
+        bleManager.refreshCaptures()
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        // Évite la fuite du client GATT quand le ViewModel est détruit
+        try {
+            bleManager.disconnect()
+        } catch (e: Exception) {
+            Log.e("BLE", "onCleared disconnect failed: ${e.message}")
+        }
     }
 }

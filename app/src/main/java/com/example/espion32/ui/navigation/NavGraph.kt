@@ -182,7 +182,7 @@ fun AppNavigation() {
                 )
             }
             composable("pcap_library") {
-                PcapLibraryScreen(navController = navController)
+                PcapLibraryScreen(navController = navController, bleViewModel = bleViewModel)
             }
         }
     }

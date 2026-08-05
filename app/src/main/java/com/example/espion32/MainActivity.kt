@@ -29,18 +29,34 @@ class MainActivity : ComponentActivity() {
     @SuppressLint("MissingPermission")
     private val requestBluetoothPermissions =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
-            android.util.Log.d("MainActivity", "📋 Permission results: $permissions")
-            val allGranted = permissions.values.all { it }
-            if (allGranted) {
-                android.util.Log.d("MainActivity", "✅ All permissions granted!")
+            android.util.Log.d("MainActivity", "Permission results: $permissions")
+            permissions.forEach { (perm, granted) ->
+                android.util.Log.d("MainActivity", "  $perm: $granted")
+            }
+
+            // Le BLE peut fonctionner même si la localisation est refusée.
+            val btOk = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) ==
+                    PackageManager.PERMISSION_GRANTED
+            } else true
+
+            if (btOk) {
                 initBluetooth()
             } else {
-                android.util.Log.e("MainActivity", "❌ Some permissions denied!")
-                permissions.forEach { (perm, granted) ->
-                    android.util.Log.e("MainActivity", "  $perm: $granted")
-                }
+                toast("Bluetooth refusé : impossible de piloter l'ESP32.")
+            }
+
+            // La localisation FINE est requise pour le scan WiFi.
+            val locOk = checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) ==
+                PackageManager.PERMISSION_GRANTED
+            if (!locOk) {
+                toast("Localisation refusée : le scan WiFi renverra une liste vide.")
             }
         }
+
+    private fun toast(msg: String) {
+        android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_LONG).show()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -51,38 +67,33 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // Request permissions for Android 12+ (API 31+)
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-            val permissionsToRequest = mutableListOf<String>()
+        requestNeededPermissions()
+    }
 
+    private fun requestNeededPermissions() {
+        val needed = mutableListOf<String>()
+
+        // Android 12+ : permissions BLE dédiées
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
             if (checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT)
                 != PackageManager.PERMISSION_GRANTED
-            ) {
-                permissionsToRequest.add(android.Manifest.permission.BLUETOOTH_CONNECT)
-            }
+            ) needed.add(android.Manifest.permission.BLUETOOTH_CONNECT)
 
             if (checkSelfPermission(android.Manifest.permission.BLUETOOTH_SCAN)
                 != PackageManager.PERMISSION_GRANTED
-            ) {
-                permissionsToRequest.add(android.Manifest.permission.BLUETOOTH_SCAN)
-            }
+            ) needed.add(android.Manifest.permission.BLUETOOTH_SCAN)
+        }
 
-            if (permissionsToRequest.isNotEmpty()) {
-                requestBluetoothPermissions.launch(permissionsToRequest.toTypedArray())
-            } else {
-                initBluetooth()
-            }
+        // ACCESS_FINE_LOCATION : indispensable au scan WiFi (scanResults) sur
+        // TOUS les niveaux d'API (et au scan BLE < Android 12).
+        if (checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION)
+            != PackageManager.PERMISSION_GRANTED
+        ) needed.add(android.Manifest.permission.ACCESS_FINE_LOCATION)
+
+        if (needed.isNotEmpty()) {
+            requestBluetoothPermissions.launch(needed.toTypedArray())
         } else {
-            // For older Android versions, request location permission
-            if (checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION)
-                != PackageManager.PERMISSION_GRANTED
-            ) {
-                requestBluetoothPermissions.launch(
-                    arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION)
-                )
-            } else {
-                initBluetooth()
-            }
+            initBluetooth()
         }
     }
 

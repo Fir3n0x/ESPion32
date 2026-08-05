@@ -16,17 +16,21 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import com.example.espion32.autowide
-import com.example.espion32.pcap.PcapManager
+import com.example.espion32.viewmodel.BleViewModel
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
 
 @Composable
-fun PcapLibraryScreen(navController: NavController) {
+fun PcapLibraryScreen(navController: NavController, bleViewModel: BleViewModel) {
     val context = LocalContext.current
-    val pcapManager = remember { PcapManager(context) }
-    var captures by remember { mutableStateOf(pcapManager.listCaptures()) }
+    // Utilise le PcapManager PARTAGÉ (via le ViewModel) : la librairie reflète
+    // les captures reçues en direct, plus d'instance séparée désynchronisée.
+    val captures by bleViewModel.savedCaptures.collectAsState()
     var selectedFile by remember { mutableStateOf<File?>(null) }
+
+    // Rafraîchit à l'ouverture de l'écran
+    LaunchedEffect(Unit) { bleViewModel.refreshCaptures() }
 
     Column(
         modifier = Modifier
@@ -88,7 +92,7 @@ fun PcapLibraryScreen(navController: NavController) {
                         onSelect = { selectedFile = if (selectedFile == file) null else file },
                         onDelete = {
                             file.delete()
-                            captures = pcapManager.listCaptures()
+                            bleViewModel.refreshCaptures()
                             if (selectedFile == file) selectedFile = null
                         },
                         onShare = { sharePcapFile(context, file) }

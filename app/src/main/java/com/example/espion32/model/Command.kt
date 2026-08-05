@@ -55,9 +55,11 @@ sealed class Command {
     }
 
     fun idForAttackMode(attackMode: AttackMode): String =
-        when(attackMode) { // Transform AttackMode class to id
-            AttackMode.DEAUTH -> "1"
-            AttackMode.AUTH_STEALER -> "2"
+        when(attackMode) { // Transform AttackMode class to id (aligné firmware ATTACKMODE)
+            AttackMode.DEAUTH -> "1"          // deauth classique
+            AttackMode.AUTH_STEALER -> "2"    // handshake par deauth + reconnexion
+            AttackMode.PASSIVE_CAPTURE -> "3" // capture passive (sans deauth)
+            AttackMode.PMKID -> "4"           // capture PMKID
         }
 
     // BEACON FRAME SPAM

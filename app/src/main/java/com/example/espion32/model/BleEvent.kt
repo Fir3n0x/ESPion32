@@ -41,7 +41,7 @@ sealed class BleEvent {
     }
 
     data class PcapEnd(
-        val crc : Int
+        val crc : Long   // CRC32 = 32 bits non signés
     ) : BleEvent() {
         override val subtype: String? = null
     }

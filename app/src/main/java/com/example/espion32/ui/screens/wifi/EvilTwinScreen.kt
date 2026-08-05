@@ -155,6 +155,24 @@ fun EvilTwinScreen(navController: NavController, bleViewModel: BleViewModel, wif
                 .padding(horizontal = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            // Fonctionnalité non implémentée côté firmware (stub) : on prévient
+            // clairement l'opérateur et on désactive le lancement.
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF5A1E1E), RoundedCornerShape(6.dp))
+                    .padding(10.dp)
+            ) {
+                Text(
+                    text = "⚠ Evil Twin non implémenté (firmware stub) — panneau désactivé",
+                    color = Color(0xFFFFC9C9),
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp
+                )
+            }
+
+            Spacer(Modifier.height(12.dp))
+
             // Column / Box Set Harvest Method
             EvilTwinDropdown(
                 label = "Harvest Method",
@@ -274,7 +292,7 @@ fun EvilTwinScreen(navController: NavController, bleViewModel: BleViewModel, wif
                             if (isAttackRunning) Color(0xFFCC0000) else Color(0xFF1E2624),
                             RoundedCornerShape(8.dp)
                         )
-                        .clickable(enabled = (safetyCheckbox && !nameEvilTwin.isEmpty() && nameEvilTwin.length <= 30)) {
+                        .clickable(enabled = false) { // désactivé : firmware non implémenté
                             isAttackRunning = !isAttackRunning
                             if (isAttackRunning) {
                                 // START ATTACK

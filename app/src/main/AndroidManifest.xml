@@ -10,10 +10,10 @@
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
 
-    <!-- BLE scan < Android 12 -->
-    <uses-permission
-        android:name="android.permission.ACCESS_FINE_LOCATION"
-        android:maxSdkVersion="30"/>
+    <!-- ACCESS_FINE_LOCATION : requis pour le SCAN WIFI (scanResults) à TOUS les
+         niveaux d'API, et pour le scan BLE < Android 12. Le maxSdkVersion=30
+         précédent le rendait indisponible sur API 31+ -> scan WiFi vide. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 
     <!-- SCAN WIFI -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />

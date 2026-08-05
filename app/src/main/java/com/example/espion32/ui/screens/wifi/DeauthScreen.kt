@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.espion32.autowide
 import com.example.espion32.model.Command
+import com.example.espion32.model.PcapTransferState
 import com.example.espion32.model.WifiNetwork
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -53,7 +54,9 @@ import kotlinx.coroutines.launch
 
 enum class AttackMode(val label: String) {
     DEAUTH("Deauth Attack"),
-    AUTH_STEALER("Auth Stealer")
+    AUTH_STEALER("Auth Stealer"),
+    PASSIVE_CAPTURE("Passive Capture"),
+    PMKID("PMKID")
 }
 
 @SuppressLint("MissingPermission")
@@ -68,6 +71,10 @@ fun DeauthScreen(navController: NavController, bleViewModel: BleViewModel, wifiV
     var targetMac by remember { mutableStateOf("FF:FF:FF:FF:FF:FF") }
     val attackLogs by bleViewModel.attackLogsDeauth.collectAsState()
     var isAttackRunning by remember { mutableStateOf(false) }
+
+    // État réel côté ESP32 (ACK STATUS) + progression du transfert PCAP
+    val deauthRunning by bleViewModel.deauthRunning.collectAsState()
+    val pcapState by bleViewModel.pcapEvents.collectAsState()
     var safetyCheckbox by remember { mutableStateOf(false) }
     var testAttackCheckbox by remember { mutableStateOf(false) }
 
@@ -87,6 +94,12 @@ fun DeauthScreen(navController: NavController, bleViewModel: BleViewModel, wifiV
         isAttackRunning = false
         safetyCheckbox = false
         testAttackCheckbox = false
+    }
+
+    // Synchronise l'UI sur l'état RÉEL de l'ESP32 (fin d' UI optimiste) :
+    // les modes de capture s'arrêtent d'eux-mêmes -> le bouton se remet seul.
+    LaunchedEffect(deauthRunning) {
+        isAttackRunning = deauthRunning
     }
 
     // Detect when user scrolls
@@ -361,6 +374,31 @@ fun DeauthScreen(navController: NavController, bleViewModel: BleViewModel, wifiV
 
             Spacer(Modifier.height(16.dp))
 
+            // Progression du transfert PCAP (capture handshake / PMKID)
+            when (val s = pcapState) {
+                is PcapTransferState.Receiving -> Text(
+                    text = "PCAP: réception... chunk ${s.chunksReceived}",
+                    color = Color(0xFF1E2624),
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp
+                )
+                is PcapTransferState.Done -> Text(
+                    text = "PCAP: enregistré ✓",
+                    color = Color(0xFF1E7A34),
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp
+                )
+                is PcapTransferState.Error -> Text(
+                    text = "PCAP: ${s.reason}",
+                    color = Color(0xFFCC0000),
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp
+                )
+                else -> {}
+            }
+
+            Spacer(Modifier.height(8.dp))
+
             // Bottom Controls: Launch Button & Safety Checkbox
             Row(
                 modifier = Modifier
@@ -379,33 +417,24 @@ fun DeauthScreen(navController: NavController, bleViewModel: BleViewModel, wifiV
                         .clickable(enabled = safetyCheckbox) {
                             isAttackRunning = !isAttackRunning
                             if (isAttackRunning) {
-                                if(testAttackCheckbox) {
-                                    // TEST ATTACK
-                                    bleViewModel.logLocalDeauth("Test attack started on ${selectedNetwork?.ssid}")
-                                    bleViewModel.bleManager.setCurrentTargetSsid(selectedNetwork?.ssid ?: "unknown")
+                                val ssid = selectedNetwork?.ssid ?: "unknown"
+                                bleViewModel.bleManager.setCurrentTargetSsid(ssid)
+
+                                if (attackMode == AttackMode.DEAUTH && testAttackCheckbox) {
+                                    // TEST ATTACK (auto-terminé côté ESP32)
+                                    bleViewModel.logLocalDeauth("Test attack started on $ssid")
                                     launchTestDeauthAttack(bleViewModel, selectedNetwork, targetMac)
                                     safetyCheckbox = false
                                     testAttackCheckbox = false
                                     isAttackRunning = false
                                 } else {
-                                    if(attackMode === AttackMode.DEAUTH) {
-                                        // DEAUTH ATTACK
-                                        bleViewModel.logLocalDeauth("Deauth Attack started on ${selectedNetwork?.ssid}")
-                                        bleViewModel.bleManager.setCurrentTargetSsid(selectedNetwork?.ssid ?: "unknown")
-                                        launchDeauthAttack(bleViewModel, selectedNetwork, targetMac, attackMode)
-                                    }
-                                    else if(attackMode === AttackMode.AUTH_STEALER) {
-                                        // AUTH STEALER ATTACK
-                                        bleViewModel.logLocalDeauth("Auth Stealer Attack started on ${selectedNetwork?.ssid}")
-                                        bleViewModel.bleManager.setCurrentTargetSsid(selectedNetwork?.ssid ?: "unknown")
-                                        launchDeauthAttack(bleViewModel, selectedNetwork, targetMac, attackMode)
-                                        safetyCheckbox = false
-                                        isAttackRunning = false
-                                    } else {
-                                        // ERROR
-                                        bleViewModel.logLocalDeauth("Error attack not found")
-                                    }
-
+                                    // Deauth classique OU modes de capture
+                                    // (Auth Stealer / Passive Capture / PMKID).
+                                    // L'état réel est ensuite piloté par l'ACK STATUS :
+                                    // les captures repassent "STOPPED" toutes seules.
+                                    bleViewModel.logLocalDeauth("${attackMode.label} started on $ssid")
+                                    launchDeauthAttack(bleViewModel, selectedNetwork, targetMac, attackMode)
+                                    safetyCheckbox = false
                                 }
                             } else {
                                 // STOP ATTACK
